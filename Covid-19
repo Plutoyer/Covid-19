@@ -1,0 +1,240 @@
+import requests
+import pandas as pd
+import json
+from pyecharts.charts import *  # 导入所有图表,因为pyecharts版本的更新，需要从charts中导入图表
+from pyecharts import options as opts
+from pyecharts.globals import ThemeType  # 导入pyecharts的主题
+import time
+from datetime import datetime
+
+pd.set_option('display.max_columns', None)  # 限制表格，显示所有列
+
+
+# pd.set_option('display.max_rows', None)      #显示所有行
+# pd.set_option('expand_frame_repr', False)    #在一行显示完之前不准换行
+
+# 数据的爬取,爬取的数据格式为json格式
+def catch_cityinfo():
+    url = 'https://view.inews.qq.com/g2/getOnsInfo?name=disease_h5'
+    response = requests.get(url).json()['data']  # 注意json的使用，需要的是链接中的data数据集
+    data = json.loads(response)
+    return data
+
+
+while True:  # 用来设定更新时间
+    if datetime.now() < datetime(2020, 3, 2, 23, 59, 59):  # 指程序运行截至时间为2020年,3月2日,23:59:59
+        data = catch_cityinfo()
+
+        # data = catch_cityinfo()
+        # 打印出数据的keys参数，方便数据的选用与调取
+        print('data.keys:\n', data.keys())  # 使用\n来换行显示
+
+        # 数据集中处理，根据data.keys中的内容选取数据
+        # 将提取的数据打印出来，方便之后的处理
+        lastUpdateTime = data['lastUpdateTime']  # 最后更新的时间，与总量有关，可用于图表标题的使用
+        print('最后更新时间:\n', lastUpdateTime)
+        chinaTotal = data['chinaTotal']  # 全国确诊人数、疑似人数等的总数，打印后可知道具体内容，用于统计使用（画图表）
+        print('chinaTotal:\n', chinaTotal)
+        chinaAdd = data['chinaAdd']  # 全国的，较昨日新增的各项人数的总数，用于统计使用（画图表）
+        print('chinaAdd:\n', chinaAdd)
+        chinaDayList = data['chinaDayList']  # 国内每日数据，根据时间date的不同进行统计的，可用于画折线图来观察变化情况
+        print('国内每日数据chinaDayList:\n', chinaDayList)
+        chinaDayAddList = data['chinaDayAddList']  # 国内每日新增数据，根据时间date的不同进行的统计
+        print('国内每日增加数据chinaDayAddList:\n', chinaDayAddList)
+        areaTree = data['areaTree']  # 具体的每个国家的总数据，中国各个省份的总数据，各个城市的总数据，用于地图中的显示
+        print('地区分类area:\n', areaTree)  # 打印后可看到地区的数据，疫情地图的体现主要用此间的数据
+
+        # 国内数据处理
+        # 在areaTree数据中，第0行为中国的数据，areaTree是一个字典，但里面还包含有其它的字典，第0行的中国数据仍然是字典数据，所以取出其中的‘children’即可
+        china_data = areaTree[0]['children']  # 中国数据，children中有各个省份的数据
+        print('china_data:\n', china_data)
+        china_list = []  # 先定义一个数组，之后用
+
+        for a in range(len(china_data)):  # len测定china_data的长度，然后将此长度赋值给a
+            province = china_data[a]['name']  # 通过对a的赋值（0-len（china_data）），将各个省份的名称存到新的字典province中
+            province_data = china_data[a]['children']  # 将children，即每个省份中各个城市的信息的字典数据，存在新字典province_data中
+            for b in range(len(province_data)):  # 与a同理
+                city = province_data[b]['name']  # 取出各个城市的名称
+                city_today = province_data[b]['today']
+                # print('city_today:',city_today)    #查看today中的数据类型，方便提取
+                city_total = province_data[b]['total']  # 取出各个城市的总数的列表数据
+                # print('city_total:',city_total)    #查看total中的数据类型，方便提取
+
+                china_dict = {}
+
+                china_dict['province'] = province
+                china_dict['city'] = city
+                china_dict['total'] = city_total
+                china_dict['today'] = city_today
+
+                # 将每个小字典用append函数加到一个china_list的数组中，最后形成的数据形式为[{...}]
+                china_list.append(china_dict)
+
+        china_data = pd.DataFrame(china_list)  # 注意DataFrame的使用
+        print('初步处理后china_data:\n', china_data.head())
+
+
+        # 定义处理函数
+        def confirm(x):  # confirm指已确认的人数
+            confirm = eval(str(x))['confirm']  # eval输出的是字典，str将数据转换为字符串，理解为在原有的数据上加了冒号：“”
+            return confirm
+
+
+        def suspect(x):  # suspect指疑似的人数
+            suspect = eval(str(x))['suspect']
+            return suspect
+
+
+        def dead(x):  # dead指死亡人数
+            dead = eval(str(x))['dead']
+            return dead
+
+
+        def heal(x):  # heal指治愈人数
+            heal = eval(str(x))['heal']
+            return heal
+
+
+        # map的作用是运行map（）中的指定的函数，作用对象是列表数据，会保存一个新的列表，不改变原有数据
+        # 推测china_data['total']的作用是提取出'total'列表数据，作为map（）的输入数据
+        china_data['confirm'] = china_data['total'].map(confirm)
+        china_data['suspect'] = china_data['total'].map(suspect)
+        china_data['dead'] = china_data['total'].map(dead)
+        china_data['heal'] = china_data['total'].map(heal)
+        china_data['addconfirm'] = china_data['today'].map(confirm)
+        china_data['addsuspect'] = china_data['today'].map(suspect)
+        china_data['adddead'] = china_data['today'].map(dead)
+        china_data['addheal'] = china_data['today'].map(heal)
+
+        # 整个列表中包含有province、total、today、confirm等数据，此时已经将total与today的数据提取出来了，包含在confirm、suspect等数据中
+        # 因此用以下的代码，将china_data中的total、today数据去除
+        # python中单引号双引号都可以用来表示字符串，两者的结合使用，会使得字符串的表示更加灵活
+        china_data = china_data[["city", "province", "confirm", "suspect",
+                                 "dead", "heal", "addconfirm", "addsuspect", "adddead", "addheal"]]
+
+        # 尝试注释上一行代码，可以发现其中的区别
+        # print(china_data)
+        print("完全处理后china_data:\n", china_data.head())  # 用表格的形式表现，可以更直观的看出数据的结构
+
+        # 国际数据处理
+        global_data = pd.DataFrame(areaTree)  # 从areaTree中看数据结构，用来提取数据
+        global_data['confirm'] = global_data['total'].map(confirm)
+        global_data['suspect'] = global_data['total'].map(suspect)
+        global_data['dead'] = global_data['total'].map(dead)
+        global_data['heal'] = global_data['total'].map(heal)
+        global_data['addconfirm'] = global_data['today'].map(confirm)
+        global_data['addsuspect'] = global_data['today'].map(suspect)
+        global_data['adddead'] = global_data['today'].map(dead)
+        global_data['addheal'] = global_data['today'].map(heal)
+
+        # 需要添加中英文对照表
+        # 因为pyecharts自带的全球地图中，国家名字为英文，所以需要用英文名称将数据与图斑对应
+        global_name = pd.read_excel(r"C:\Users\金少\Desktop\Jupyter Notebook\Datasets\国家中英文对照.xlsx")
+        # 用pd.merge来合并，left_on与right_on是两张表中用来参考合并的列
+        # how为插入方式，inner指合并位置为两张表的公共部分，加入参考值中存在不相同的部分，则两者都保存，无数据的记录为NaN
+        global_data = pd.merge(global_data, global_name, left_on="name", right_on="中文", how="inner")
+        global_data = global_data[["name", "英文", "confirm", "suspect", "dead", "heal",
+                                   "addconfirm", "addsuspect", "adddead", "addheal"]]
+        print("global_data:\n", global_data.head())
+
+        # 数据可视化
+
+        # pyecharts画图步骤，先确定底图，比如Pie为饼图，Bar为柱状图，Map为地图，同时确定画布的主题与大小
+        # 第二步用add函数添加数据，add中的内容包括图表的坐标以及对应的数据，图表在画布中的位置等
+        # add在底图为地图时，需要确定底图的类型，即maptype = 'world'或'china'或'湖北'
+        # 用get_global_opts定义图表名称，通过visualmap_opts修改配色以及图例的范围
+        # 用set_series_opts来确定图例样式
+        # 用render保存为html文件
+
+
+        # 全球疫情确诊地图
+        world_map = Map(init_opts=opts.InitOpts(theme=ThemeType.WESTEROS))
+        world_map.add("", [list(z) for z in zip(list(global_data["英文"]), list(global_data["confirm"]))],
+                      maptype='world',
+                      is_map_symbol_show=True)  # is_map_symbol_show会有地图标记，每个国家上面有一个点
+        world_map.set_global_opts(title_opts=opts.TitleOpts(title="nCoV全球疫情地图"),
+                                  visualmap_opts=opts.VisualMapOpts(is_piecewise=True,
+                                                                    pieces=[
+                                                                        {"min": 101, "label": '>100'},
+                                                                        {"min": 10, "max": 100, "label": '10-100'},
+                                                                        {"min": 0, "max": 9, "label": '0-9'}
+                                                                    ]))
+        world_map.set_series_opts(label_opts=opts.LabelOpts(is_show=False))  # 如果为True，则会在地图上显示各个国家的名字
+        world_map.render('world_map.html')
+
+        # 中国各省份疫情地图
+        area_data = china_data.groupby("province")[
+            "confirm"].sum().reset_index()  # reset_index为恢复索引，理解为在列表前加入了0，1，2...将每一行的对应值联系起来
+        area_data.columns = ["province", "confirm"]  # 这里定义area_data的列方向的索引，针对DataFrame的数据
+
+        area_map = Map(init_opts=opts.InitOpts(theme=ThemeType.WESTEROS))
+        area_map.add("", [list(z) for z in zip(list(area_data["province"]), list(area_data["confirm"]))],
+                     maptype="china",
+                     is_map_symbol_show=False)
+        area_map.set_global_opts(title_opts=opts.TitleOpts(title="nCoV中国疫情地图"),
+                                 visualmap_opts=opts.VisualMapOpts(is_piecewise=True, pieces=
+                                 [
+                                     {"min": 1001, "label": '>1000', "color": "#893448"},  # 不指定 max，表示 max 为无限大
+                                     {"min": 500, "max": 1000, "label": '500-1000', "color": "#ff585e"},
+                                     {"min": 101, "max": 499, "label": '101-499', "color": "#fb8146"},
+                                     {"min": 10, "max": 100, "label": '10-100', "color": "#ffb248"},
+                                     {"min": 0, "max": 9, "label": '0-9', "color": "#fff2d1"}
+                                 ]))
+        area_map.set_series_opts(label_opts=opts.LabelOpts(is_show=False))  # 如果为True，则会在地图上显示各个身份的名字
+        area_map.render("area_map.html")
+
+        # 城市疫情图
+        chinaCity_data = china_data[["city", "province", "confirm"]]
+        # print('chinaCity_data:\n',chinaCity_data)
+
+        city_name = pd.read_excel(r'C:\Users\金少\Desktop\Jupyter Notebook\Datasets\中国省份和城市对照表.xlsx')
+        # print('city_name:\n',city_name)
+
+        # 在DataFrame数据中，用此来计算出表格行数（https://blog.csdn.net/u012189747/article/details/78203364）
+        row_number = area_data.iloc[:, 0].size
+        # print(area_data.iloc[:,0].size)
+
+        # 注意area_data为DataFrame数据格式的对象，定位数据的方式有所不同
+        # 如下中的area_data['province'].loc[na]，前面的['province']为列方向的索引，loc[na]为行方向索引（https://blog.csdn.net/angaixing0071/article/details/101700345）
+        # 在编写时，可先设置一个数值，比如设置for na in range(0,1)，用来验证代码，之后再改成for na in range(0,row_number):
+        for na in range(0, row_number):
+            provinceName = area_data['province'].loc[na]
+            # print('provinceName:\n',provinceName)
+
+            city_data = china_data.loc[china_data['province'] == provinceName].reset_index(drop=True).reset_index()
+            # print('city_data:\n',city_data)  #打印出来后，观察index
+            cityName = city_name.loc[city_name['province'] == provinceName].reset_index(drop=True).reset_index()
+            # print('cityName:\n',cityName)  #打印出来后，观察index，有利于合并的进行
+            cityData = pd.merge(city_data, cityName, left_on='index', right_on='index', how='inner')
+            # print('cityData:\n', cityData)  #打印出来，有利于接下来数据的选择
+            cityData = cityData[["province_x", "city", "city_name", "confirm"]]
+            # print('cityData:\n',cityData)   #打印出来后，观察数据是否对齐
+
+            city_map = Map(init_opts=opts.InitOpts(theme=ThemeType.WESTEROS))
+            city_map.add("", [list(z) for z in zip(list(cityData['city_name']), list(cityData['confirm']))],
+                         maptype=provinceName,
+                         is_map_symbol_show=False)
+            city_map.set_global_opts(title_opts=opts.TitleOpts(provinceName + "nCoV疫情地图"),
+                                     visualmap_opts=opts.VisualMapOpts(is_piecewise=True, pieces=
+                                     [
+                                         {"min": 5001, "label": '>5000'},  # 不指定 max，表示 max 为无限大
+                                         {"min": 1501, "max": 5000, "label": '1500-5000'},
+                                         {"min": 501, "max": 1500, "label": '500-1500'},
+                                         {"min": 351, "max": 500, "label": '350-500'},
+                                         {"min": 201, "max": 350, "label": '200-350'},
+                                         {"min": 101, "max": 200, "label": '100-200'},
+                                         {"min": 51, "max": 100, "label": '50-100'},
+                                         {"min": 0, "max": 50, "label": '0-50'}
+                                     ]))
+            city_map.set_series_opts(label_opts=opts.LabelOpts(is_show=False))
+            city_map.render('{}.html'.format(provinceName))
+
+            page = Page()
+            page.add(city_map)
+
+        time.sleep(86400)  # 单位为秒，86400秒为24小时，指24小时更新一次
+    else:
+        print('已到截止时间，停止取数')
+        break
+
+
